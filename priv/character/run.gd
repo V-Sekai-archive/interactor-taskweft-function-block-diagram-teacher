@@ -1,4 +1,4 @@
-# RFD 2251 rung 1 smoke test. Reads an image path and a GGUF-set path
+# RFD66606-2251 rung 1 smoke test. Reads an image path and a GGUF-set path
 # from --image and --gguf-dir, calls Pixal3DModel.image_to_glb, writes
 # the returned GLB bytes to --out. Emits nothing else on stdout so the
 # Elixir caller can rely on the exit code.

@@ -4,7 +4,7 @@ The compiler-labelled training corpus for a teacher model that answers only in I
 
 ## What it is for
 
-The writers in `tools/` construct diagram rows, and the compiler and sandbox runners in `lib/` label them. The repository holds no model, training or inference; RFD 2236 owns the teacher's design.
+The writers in `tools/` construct diagram rows, and the compiler and sandbox runners in `lib/` label them. The repository holds no model, training or inference; RFD66606-2236 owns the teacher's design.
 
 ## Building and running
 

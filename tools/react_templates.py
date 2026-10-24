@@ -1,4 +1,4 @@
-"""Intents and the per-frame controllers they mean (RFD 2237), constructed so the
+"""Intents and the per-frame controllers they mean (RFD66606-2237), constructed so the
 labels are true by construction.
 
 Each template turns a seed into an intent, the reference controller in the text form

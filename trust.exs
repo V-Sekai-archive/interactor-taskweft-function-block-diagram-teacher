@@ -1,5 +1,5 @@
 # The trusted data sources, derived from the ReBAC tuples in OpenBao KV
-# `relationships/` (RFD 2200, verb `trusts`). Bao is authoritative; this file is
+# `relationships/` (RFD66606-2200, verb `trusts`). Bao is authoritative; this file is
 # the derived copy the writer and the publisher read, and the anti-entropy pass
 # compares the two. It is read as an AST and pattern-matched, never evaluated.
 #
