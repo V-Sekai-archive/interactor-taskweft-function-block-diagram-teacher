@@ -1,4 +1,4 @@
-"""The corpus census, and the gate on it (RFD 2236, step 2 precondition).
+"""The corpus census, and the gate on it (RFD66606-2236, step 2 precondition).
 
 Reads every stage directory given, counts rows per family, template and frame, the
 block kinds each rank1 program uses, the program length histogram, the tokens per

@@ -1,6 +1,6 @@
 defmodule TaskweftFbdTeacher.Runner.Character do
   @moduledoc """
-  RFD 2251 rung 1 runner. Reads an image plus a GGUF-set directory, boots
+  RFD66606-2251 rung 1 runner. Reads an image plus a GGUF-set directory, boots
   the assembled Godot binary named by `GODOT_ASSEMBLY_BIN`, runs the
   character workflow GDScript in headless mode, and returns the GLB bytes.
 
