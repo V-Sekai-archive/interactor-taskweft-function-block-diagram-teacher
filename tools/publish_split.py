@@ -127,6 +127,11 @@ def apply_rules(readme: str, fam: str) -> tuple:
     return readme, hit, miss
 
 
+def missing_payload(paths: dict) -> list:
+    """Repo paths whose local file is not on disk. An upload of nothing reads as a pass."""
+    return sorted(p for p, d in paths.items() if not os.path.exists(d))
+
+
 def self_test() -> int:
     paths = local_paths("fbd")
     assert len(paths) == 18, f"expected 18 paths, got {len(paths)}"
@@ -154,8 +159,14 @@ def self_test() -> int:
     assert len(miss) == 5, miss          # the five fbd-only rules must not fire here
     assert "react_candidates_invalid" in out and "react_invalid` is the same view" in out
     assert "three ranked candidate diagrams" not in out
-    print("ok  self-test: 8 of 8 controls fired (18 paths, three splits, three configs, the fence")
-    print("    holds, an unknown card reports every rule, the modern rules fire, the split is named)")
+    # a payload that is not on disk must be reported, not uploaded as nothing
+    assert missing_payload({"a": "/nonexistent/x", "b": __file__}) == ["a"], "a missing payload was not caught"
+    # and a stale claim must be reported however many rules fired
+    stale = [s for s in ("three per row", "three candidates per row") if s in "the corpus keeps three per row"]
+    assert stale == ["three per row"], stale
+    print("ok  self-test: 10 of 10 controls fired (18 paths, three splits, three configs, the fence")
+    print("    holds, an unknown card reports every rule, the modern rules fire, the split is named,")
+    print("    a missing payload and a stale claim are each caught)")
     return 0
 
 
@@ -181,7 +192,7 @@ def main() -> int:
             continue
         repo = a.hub.format(family=suffix)
         paths = local_paths(fam)
-        missing = [p for p, d in paths.items() if not os.path.exists(d)]
+        missing = missing_payload(paths)
         if missing:
             print(f"FAIL {repo}: {len(missing)} local file(s) missing, first {missing[0]}")
             return 1

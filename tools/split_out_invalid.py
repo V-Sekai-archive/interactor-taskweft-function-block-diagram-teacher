@@ -135,6 +135,33 @@ def self_test() -> int:
     ok_all, bad_all, _ = split_candidates(cand, score, rule=())
     assert_partition(cand, ok_all, bad_all, "all-ok", lambda t: [(r["row_key"], r["candidate"]) for r in t.to_pylist()])
     assert len(ok_all) == 3 and len(bad_all) == 0
+
+    # the partition gate must fail on a broken partition, or it certifies nothing.
+    # A gate that only ever passes is the defect this file was written against: the
+    # first version compared a sorted split against the input's own order and so
+    # failed on correct data, which a control would have caught immediately.
+    def catches(label, before, ok, bad, keys) -> bool:
+        try:
+            assert_partition(before, ok, bad, label, keys)
+        except SystemExit:
+            return True
+        return False
+
+    keys_flat = lambda t: [(r["row_key"], r["candidate"]) for r in t.to_pylist()]
+    mk = lambda rows: pa.Table.from_pylist(rows, schema=cand.schema)
+    full_ok, full_bad, _ = split_candidates(cand, score)
+    assert catches("lost", cand, full_ok, mk(full_bad.to_pylist()[:-1]), keys_flat), \
+        "a lost row was not caught"
+    # ok and bad must total 3 keys here, or the length check fires instead of the
+    # overlap check and the control proves the wrong branch.
+    assert catches("overlap", cand, mk(full_ok.to_pylist() + [full_bad.to_pylist()[0]]),
+                   mk([full_bad.to_pylist()[0]]), keys_flat), "an overlap was not caught"
+    assert catches("substituted", cand, full_ok,
+                   mk(full_bad.to_pylist()[:-1] + [dict(full_bad.to_pylist()[-1], candidate="rank9")]),
+                   keys_flat), "a substituted key was not caught"
+    # and it must pass on the correct split, so the controls above are not noise
+    assert not catches("correct", cand, full_ok, full_bad, keys_flat)
+
     # the nested view must keep the row on whichever side has candidates, and drop
     # it only when that side is empty
     joined = pa.Table.from_pylist([{"key": "x/1", "candidates": [
@@ -143,8 +170,9 @@ def self_test() -> int:
     jok, jbad = split_joined(joined, v)
     assert jok.num_rows == 1 and jbad.num_rows == 1, (jok.num_rows, jbad.num_rows)
     assert len(jok.to_pylist()[0]["candidates"]) == 1 and len(jbad.to_pylist()[0]["candidates"]) == 2
-    print("ok  self-test: 5 of 5 controls fired (correct rule agrees, `runs` alone is caught,")
-    print("    the wrong rule moves rank3, an all-ok rule still partitions, the nested view splits)")
+    print("ok  self-test: 8 of 8 controls fired (correct rule agrees, `runs` alone is caught,")
+    print("    the wrong rule moves rank3, an all-ok rule still partitions, the nested view splits,")
+    print("    and the partition gate catches a lost row, an overlap and a substituted key)")
     return 0
 
 
