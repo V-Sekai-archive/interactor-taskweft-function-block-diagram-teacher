@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import re
 import sys
@@ -87,11 +88,26 @@ def self_test() -> int:
 
 
 def hf_token_from_bao() -> str:
+    """This desk's Bao agent row, or the `bao-hf-token` helper where the desk has one.
+
+    The row path and its client certs are the Windows desk's. A desk without them
+    reads the same vault through its own helper, so the publisher runs on either
+    rather than only where the certs happen to be installed.
+    """
+    bao = os.path.expanduser("~/bin/bao.exe")
+    if not os.path.exists(bao):
+        helper = shutil.which("bao-hf-token")
+        if not helper:
+            sys.exit("FAIL: no Bao client on this desk: neither ~/bin/bao.exe nor bao-hf-token")
+        # the helper prints a note about the vault node above the token itself
+        hf = subprocess.run([helper], capture_output=True, text=True, timeout=60).stdout.strip().splitlines()[-1].strip()
+        if not hf.startswith("hf_"):
+            sys.exit("FAIL: bao-hf-token answered no hf_ token")
+        return hf
     env = dict(os.environ, BAO_ADDR="https://100.124.200.34:8200", BAO_TLS_SERVER_NAME="weftspun-bao.internal",
                BAO_CACERT=os.path.expanduser("~/.magi/ca-bundle.pem"),
                BAO_CLIENT_CERT=os.path.expanduser("~/.magi/v3-leaf-int.pem"),
                BAO_CLIENT_KEY=os.path.expanduser("~/.magi/bao-client-v3.key"))
-    bao = os.path.expanduser("~/bin/bao.exe")
     # the login prints a note about not storing the token above the token itself
     tok = subprocess.run([bao, "login", "-method=cert", "-no-store", "-field=token"], env=env,
                          capture_output=True, text=True, timeout=60).stdout.strip().splitlines()[-1].strip()
