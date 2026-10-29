@@ -7,8 +7,16 @@ that performs the plan's steps in a scratch directory score every candidate, and
 controls are asserted on every row before anything is written. A holdout of one row
 in ten is written apart and never trains.
 
+Each candidate also keeps the plan it ran, in `plan_json`, and what running it returned,
+in `result_json`: the plan its own program compiles to, or with `--plan-source rectgtn`
+the RECTGTN domain's own plan for `--plan-domain`. A candidate the compiler refuses has
+no plan and keeps an empty slot rather than borrowing one.
+
     python tools/write_fbd_rows.py --rows 5000 --out work/stage
     python tools/write_fbd_rows.py --rows 20 --out work/smoke --negative-control
+    python tools/write_fbd_rows.py --rows 20 --out work/smoke --plan-source rectgtn \
+        --plan-domain ../taskweft/priv/smoke/blocks_world.jsonld \
+        --plan-problem ../taskweft/priv/plans/problems/blocks_world_1a.jsonld
 """
 from __future__ import annotations
 
@@ -39,6 +47,7 @@ from godot_api_templates import GODOT_TEMPLATES, godot_row_for, signatures_of  #
 from trainer_api_templates import TRAINER_TEMPLATES, trainer_row_for  # noqa: E402
 from udon_templates import TEMPLATES as UDON_TEMPLATES, udon_row  # noqa: E402
 from census import blocks_of  # noqa: E402
+from rectgtn_plan import plan_json_of as rectgtn_plan_json  # noqa: E402
 
 HERE = Path(__file__).resolve().parent.parent
 CANDIDATES = [("rank1", 1), ("rank3", 3), ("rank5", 5)]
@@ -205,6 +214,7 @@ def score_candidate(compiler: Path, row: Row, name: str, xml: Path, negative_con
     t0 = time.perf_counter()
     parses, compiles, plan, refusal = compile_one(compiler, xml)
     runs, steps, effect = False, 0, False
+    out = ""
     if compiles and plan is not None:
         scratch = Path(tempfile.mkdtemp(prefix="fbd_"))
         try:
@@ -218,7 +228,42 @@ def score_candidate(compiler: Path, row: Row, name: str, xml: Path, negative_con
     if negative_control and name == "rank1":
         parses, compiles, runs, effect = False, False, False, False
     return {"candidate": name, "parses": parses, "compiles": compiles, "runs": runs,
-            "effect_matches": effect, "steps": steps, "wall_ms": wall_ms, "refusal": refusal}
+            "effect_matches": effect, "steps": steps, "wall_ms": wall_ms, "refusal": refusal,
+            "_plan": json.dumps(plan, sort_keys=True) if plan is not None else "",
+            "_result": _run_record(runs, steps, out) if plan is not None else ""}
+
+
+def _run_record(ran: bool, steps: int, log: str) -> str:
+    """What running a plan returned, as the corpus stores it: text, never a null."""
+    return json.dumps({"ran": ran, "steps": steps, "log": log}, sort_keys=True)
+
+
+def _keep_plan(row_dir: Path, name: str, plan_json: str, result_json: str) -> None:
+    """A row keeps the plan it ran and what running it returned; the corpus reads both."""
+    (row_dir / f"{name}.plan.json").write_text(plan_json, encoding="utf-8")
+    (row_dir / f"{name}.result.json").write_text(result_json, encoding="utf-8")
+
+
+_rectgtn_cache: list[tuple[str, str]] = []
+
+
+def rectgtn_row_plan() -> tuple[str, str]:
+    """The RECTGTN domain's own plan, and its temporal verdict, once per run.
+
+    The planner's answer does not vary by candidate, so it is asked for once. The
+    verdict is the domain's own measurement, which is what the corpus records.
+    """
+    if not _rectgtn_cache:
+        domain = os.environ.get("TASKWEFT_PLAN_DOMAIN", "")
+        if not domain:
+            raise SystemExit("FAIL: --plan-source rectgtn needs --plan-domain, a domain JSON-LD")
+        merged = json.loads(Path(domain).read_text(encoding="utf-8"))
+        problem = os.environ.get("TASKWEFT_PLAN_PROBLEM", "")
+        if problem:
+            merged = {**merged, **json.loads(Path(problem).read_text(encoding="utf-8"))}
+        text = rectgtn_plan_json(merged)
+        _rectgtn_cache.append((text, json.dumps(json.loads(text)["temporal"], sort_keys=True)))
+    return _rectgtn_cache[0]
 
 
 def assert_controls(key: str, scores: dict[str, dict]) -> None:
@@ -246,11 +291,20 @@ def build_row(compiler: Path, out: Path, template_id: str, seed: int, negative_c
     for name, rank in CANDIDATES:
         xml_path = row_dir / f"{name}.plcopen.xml"
         xml_path.write_text(getattr(row, name), encoding="utf-8")
-        scores[name] = score_candidate(compiler, row, name, xml_path, negative_control)
+        score = score_candidate(compiler, row, name, xml_path, negative_control)
+        plan_text = score.pop("_plan")
+        result_text = score.pop("_result")
+        # The RECTGTN domain's own plan stands in for a candidate the compiler accepted;
+        # a refused candidate has no plan, and its slot stays empty rather than borrowing one.
+        if os.environ.get("TASKWEFT_PLAN_SOURCE") == "rectgtn" and score["compiles"]:
+            plan_text, result_text = rectgtn_row_plan()
+        _keep_plan(row_dir, name, plan_text, result_text)
+        scores[name] = score
         cands.append({"candidate": name, "rank": rank,
                       "fbd_text": "",
                       "fbd_xml": getattr(row, name),
-                      "plan_json": "", "result_json": "",
+                      "plan_json": _read(row_dir / f"{name}.plan.json"),
+                      "result_json": _read(row_dir / f"{name}.result.json"),
                       "fbd_path": f"rows/{template_id}/{seed}/{name}",
                       "fbd_sha": hashlib.sha256(getattr(row, name).encode("utf-8")).hexdigest(),
                       "provenance": f"constructed:{template_id}:seed:{seed}"})
@@ -327,6 +381,7 @@ def score_react(compiler: Path, row: ReactRow, name: str, fbd: Path, traces: lis
             runs, tbl, err = perform_in_trainer(out)
             outs = [[{"table": json.dumps(tbl, sort_keys=True)}]]
             steps = len(json.loads(out)["steps"])
+            _keep_plan(fbd.parent, name, out, _run_record(runs, steps, json.dumps(tbl, sort_keys=True)))
             if not runs:
                 refusal = err
     elif compiles and not traces:
@@ -337,6 +392,8 @@ def score_react(compiler: Path, row: ReactRow, name: str, fbd: Path, traces: lis
         runs = code == 0
         outs = [[{"steps": json.dumps(json.loads(out)["steps"], sort_keys=True)}]] if runs else []
         steps = len(json.loads(out)["steps"]) if runs else 0
+        _keep_plan(fbd.parent, name, out if runs else "",
+                   _run_record(runs, steps, json.dumps(outs[0][0]["steps"], sort_keys=True) if runs else ""))
         if not runs:
             refusal = err.strip()
     elif compiles:
@@ -489,7 +546,18 @@ def main() -> None:
     ap.add_argument("--holdout-blocks", default="", help="block kinds whose rows go to the evaluation split, never train")
     ap.add_argument("--negative-control", action="store_true",
                     help="hand rank5's verdict to rank1; the controls must refuse the emit")
+    ap.add_argument("--plan-source", choices=["compiler", "rectgtn"], default="compiler",
+                    help="compiler: the plan the candidate's own program compiles to; "
+                         "rectgtn: the RECTGTN domain's own plan for --plan-domain")
+    ap.add_argument("--plan-domain", default=None, help="a domain JSON-LD (with --plan-source rectgtn)")
+    ap.add_argument("--plan-problem", default=None, help="a problem JSON-LD, composed over the domain")
     args = ap.parse_args()
+
+    os.environ["TASKWEFT_PLAN_SOURCE"] = args.plan_source
+    if args.plan_domain:
+        os.environ["TASKWEFT_PLAN_DOMAIN"] = args.plan_domain
+    if args.plan_problem:
+        os.environ["TASKWEFT_PLAN_PROBLEM"] = args.plan_problem
 
     compiler = find_compiler(args.compiler)
     if compiler_sha(compiler) == "unknown":
@@ -545,6 +613,7 @@ def main() -> None:
                    "evaluation": "held-out families and block kinds, never trained or tuned on"},
         "templates": {t: sum(1 for r in rows if r["template_id"] == t) for t in template_ids},
         "controls": "rank1 compiles, runs and matches; rank3 compiles and misses; rank5 is refused; asserted on every row",
+        "plan_source": args.plan_source, "plan_domain": args.plan_domain or "",
         "compiler": Path(compiler).name, "compiler_sha": compiler_sha(compiler), **godot_record(),
         "wall_s": round(wall, 1), "counts": counts,
     }
