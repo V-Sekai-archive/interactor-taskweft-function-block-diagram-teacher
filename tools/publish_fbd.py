@@ -132,7 +132,8 @@ SCORED = {
 
 def readme(manifest: dict, hub: str = "chibifire/taskweft-fbd-editscore-train") -> str:
     family = manifest.get("family", "fbd")
-    names = [family, f"{family}_root", f"{family}_candidates", f"{family}_scores"]
+    names = [family, f"{family}_root", f"{family}_candidates", f"{family}_scores",
+             f"{family}_candidates_invalid", f"{family}_scores_invalid", f"{family}_invalid"]
     scored = SCORED.get(family, SCORED["fbd"])
     splits = [("train", "data"), ("test", "test/data"), ("evaluation", "evaluation/data")]
     present = [(sp, d) for sp, d in splits if manifest.get(f"{sp}_rows", 0) > 0]
@@ -158,9 +159,10 @@ configs:
 # {hub.split("/")[-1]}
 
 Intents and the IEC 61131-3 Function Block Diagrams that carry them out, as an
-EditScore-shaped corpus: one root row per intent, three candidates per row (rank1 the
-reference diagram, rank3 one that compiles and does the wrong thing, rank5 one the
-compiler refuses), and one score row per candidate from {scored}. Every row is
+EditScore-shaped corpus: one root row per intent, the matching candidate per row
+(rank1 the reference diagram), the refused and wrong-effect candidates split out
+into their own tables (rank3 one that compiles and does the wrong thing, rank5 one
+the compiler refuses), and one score row per candidate from {scored}. Every row is
 constructed from a template and a seed, so the labels are true by construction and
 the corpus regenerates from the seeds. Controls were asserted on every row before
 the emit.
@@ -178,19 +180,31 @@ Every artefact is in the parquet; nothing points outside it.
 `traces` (the input traces as JSON strings, empty where the family has none), and
 the EditScore stub columns.
 
-`{family}_candidates`, three per row: `candidate` and `rank`, `fbd_text` (the
-compiler's text form, verbatim), `fbd_xml` (the PLCopen XML, verbatim),
-`plan_json` and `result_json` (what the compiler planned and what the runner
-returned, where the family has a runner), `fbd_sha` (sha256 of the text the
-candidate was built from), `fbd_path` (where the writer kept it on disk) and
+`{family}_candidates`, one per row, the matching candidate: `candidate` and
+`rank`, `fbd_text` (the compiler's text form, verbatim), `fbd_xml` (the PLCopen
+XML, verbatim), `plan_json` and `result_json` (what the compiler planned and what
+the runner returned, where the family has a runner), `fbd_sha` (sha256 of the text
+the candidate was built from), `fbd_path` (where the writer kept it on disk) and
 `provenance`. An artefact a family does not produce is an empty string, never a
 null.
 
-`{family}_scores`, three per row: `parses`, `compiles`, `runs`, `effect_matches`,
-`steps`, `wall_ms`, `refusal`.
+`{family}_candidates_invalid`, the split-out rows: every candidate that was
+refused or ran to the wrong effect, with the same columns as `{family}_candidates`.
+
+`{family}_scores`, one per row: `parses`, `compiles`, `runs`, `effect_matches`,
+`steps`, `wall_ms`, `refusal`. `{family}_scores_invalid` carries the split-out
+candidates' verdicts.
 
 `{family}` is the joined view and the default config: the root row with its
-candidates, each carrying its scores.
+matching candidate, each carrying its scores. `{family}_invalid` is the same view
+of the split-out candidates.
+
+The split is a partition: `{family}_candidates` and `{family}_candidates_invalid`
+together hold every candidate the corpus was built with, and so do
+`{family}_scores` with `{family}_scores_invalid` and `{family}` with
+`{family}_invalid`. A candidate is invalid when it was refused or its effect did
+not match, read from `{family}_scores` and cross-checked against the rank, so the
+two never disagree.
 
 Rows: {manifest["rows"]} ({counts}).
 Templates: {json.dumps(manifest["templates"])}. Compiler: taskweft-fbd-compiler
